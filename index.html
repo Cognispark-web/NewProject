@@ -118,7 +118,7 @@
         <div id="countdown-screen" class="hidden text-center space-y-4">
             <h2 class="text-2xl font-bold text-gray-800">Accessing Your Content...</h2>
             <p class="text-gray-600">
-                The content will be available in <span id="access-timer" class="font-bold text-indigo-600">2:00</span> minutes.
+                The content will be available in <span id="access-timer" class="font-bold text-indigo-600">1:00</span> minute.
                 <br>This is a highly secured page.
             </p>
             <div class="relative w-24 h-24 mx-auto">
@@ -173,10 +173,10 @@
         };
 
         const SECURE_ACCESS_TOKEN = 'secure_access_token';
-        const ACCESS_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
+        const ACCESS_TIMEOUT_MS = 1 * 60 * 1000; // 1 minute
         const VIEWING_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
-        const imagePlaceholder = 'https://placehold.co/800x600/f8fafc/1f2937?text=Example+Exam+Paper';
+        const imagePlaceholder = 'https://placehold.co/800x600/f8fafc/1f2937?text=English+Question+Paper';
         
         let watermarkInterval;
         let countdownInterval;
@@ -228,8 +228,6 @@
             // Hide the "Pay Now" button and show the "I have paid" button
             document.getElementById('pay-button').classList.add('hidden');
             document.getElementById('paid-button').classList.remove('hidden');
-
-            showMessage("Redirecting to your UPI app. After payment, please come back to this page and click 'I have paid'.");
         };
 
         const initiateSecureAccess = () => {
@@ -272,11 +270,13 @@
                 showScreen(Screens.ERROR);
             } else {
                 showScreen(Screens.SECURE);
-                startSecureViewing();
+                // Calculate remaining time and pass it to startSecureViewing
+                const remainingTime = token.expiry - Date.now();
+                startSecureViewing(remainingTime);
             }
         };
 
-        const startSecureViewing = () => {
+        const startSecureViewing = (remainingMs = VIEWING_TIMEOUT_MS) => {
             const canvas = document.getElementById('watermark-canvas');
             const ctx = canvas.getContext('2d');
             const img = new Image();
@@ -315,13 +315,17 @@
             img.src = imagePlaceholder;
 
             // Start 10-minute viewing timer
-            let timeLeft = VIEWING_TIMEOUT_MS / 1000;
+            let timeLeft = Math.floor(remainingMs / 1000);
             const timerElement = document.getElementById('image-timer');
             imageTimerInterval = setInterval(() => {
                 timeLeft--;
                 const minutes = Math.floor(timeLeft / 60);
                 const seconds = timeLeft % 60;
                 timerElement.innerText = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                
+                if (timeLeft <= 0) {
+                    clearInterval(imageTimerInterval);
+                }
             }, 1000);
 
             viewingTimeout = setTimeout(() => {
@@ -332,7 +336,7 @@
                 const ctx = canvas.getContext('2d');
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 showScreen(Screens.ERROR);
-            }, VIEWING_TIMEOUT_MS);
+            }, remainingMs);
         };
 
         // Event listeners to prevent common download/screenshot actions
@@ -354,17 +358,15 @@
             const storedToken = localStorage.getItem(SECURE_ACCESS_TOKEN);
             if (storedToken) {
                 const token = JSON.parse(storedToken);
-                if (Date.now() < token.expiry) {
-                    // If the token is valid, immediately proceed to the secure page
+                const remainingTime = token.expiry - Date.now();
+                
+                if (remainingTime > 0) {
+                    // If the token is valid, immediately proceed to the secure page and start the timer from remaining time
                     showScreen(Screens.SECURE);
-                    startSecureViewing();
-                    const timeLeft = Math.floor((token.expiry - Date.now()) / 1000);
-                    if (timeLeft > 0) {
-                        document.getElementById('image-timer').innerText = `${Math.floor(timeLeft / 60)}:${(timeLeft % 60).toString().padStart(2, '0')}`;
-                    }
+                    startSecureViewing(remainingTime);
                 } else {
                     localStorage.removeItem(SECURE_ACCESS_TOKEN);
-                    showScreen(Screens.HOME); // Token expired, go to home screen
+                    showScreen(Screens.ERROR); // Token expired, show error
                 }
             } else {
                 showScreen(Screens.HOME);
@@ -374,3 +376,4 @@
     </script>
 </body>
 </html>
+
