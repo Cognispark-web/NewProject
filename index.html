@@ -1,0 +1,418 @@
+import React, { useEffect, useState, useRef } from "react";
+import QRCode from "qrcode";
+
+// Ephemeral Secure Images Shop
+// Single-file React component (mobile-first) using Tailwind classes.
+// Notes:
+// - This front-end demonstrates UI + client mechanisms to make images ephemeral
+//   and harder to download/screenshot. It is NOT foolproof — true protection
+//   requires a server-side component and DRM-like measures. See comments below.
+// - For production you should implement server endpoints to generate one-time
+//   tokens, verify payments, stream images, and deliver short-lived URLs.
+
+export default function App() {
+  // Steps: home -> payment -> waiting -> viewer
+  const [step, setStep] = useState("home");
+  const [school] = useState("Chela Mary Memorial School Motihari");
+  const [className] = useState("10th Class");
+  const [subject, setSubject] = useState("English");
+  const [upiId] = useState("rk1260137@oksbi");
+  const [qrDataUrl, setQrDataUrl] = useState(null);
+
+  // Ephemeral token (in real app: created by server after payment verification)
+  const [sessionToken, setSessionToken] = useState(null);
+  const [waitSecondsLeft, setWaitSecondsLeft] = useState(120); // 2 minutes
+
+  // Viewer state
+  const [viewerStartedAt, setViewerStartedAt] = useState(null);
+  const [viewExpirySecondsLeft, setViewExpirySecondsLeft] = useState(600); // 10 minutes
+  const watermarkRef = useRef(null);
+
+  // Mock images - in production serve images from a secured streaming endpoint
+  const mockImages = [
+    "/images/sample1.jpg",
+    "/images/sample2.jpg",
+    "/images/sample3.jpg",
+  ];
+
+  // Generate UPI deep link QR
+  useEffect(() => {
+    const upiDeepLink = `upi://pay?pa=${encodeURIComponent(
+      upiId
+    )}&pn=${encodeURIComponent("Ephemeral Images Store")}&tn=${encodeURIComponent(
+      "Purchase: " + subject
+    )}&am=10&cu=INR`;
+
+    QRCode.toDataURL(upiDeepLink, { width: 300 })
+      .then((url) => setQrDataUrl(url))
+      .catch(() => setQrDataUrl(null));
+  }, [upiId, subject]);
+
+  // Start the waiting countdown (2 minutes) AFTER user clicks "I Paid"
+  useEffect(() => {
+    if (step !== "waiting") return;
+    setWaitSecondsLeft(120);
+    const int = setInterval(() => {
+      setWaitSecondsLeft((s) => {
+        if (s <= 1) {
+          clearInterval(int);
+          // In production: verify payment server-side then issue a server-signed token
+          // Here we create a session token bound to sessionStorage and a short expiry
+          const token = generateToken();
+          sessionStorage.setItem("ephemeral_token", token);
+          sessionStorage.setItem("ephemeral_token_created", Date.now().toString());
+          setSessionToken(token);
+          setStep("viewer");
+          setViewerStartedAt(Date.now());
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(int);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
+  // Viewer expiry countdown
+  useEffect(() => {
+    if (step !== "viewer") return;
+    setViewExpirySecondsLeft(600);
+    const int = setInterval(() => {
+      setViewExpirySecondsLeft((s) => {
+        if (s <= 1) {
+          clearInterval(int);
+          // expire token
+          sessionStorage.removeItem("ephemeral_token");
+          setSessionToken(null);
+          setStep("expired");
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(int);
+  }, [step]);
+
+  // Move watermark every second
+  useEffect(() => {
+    let int;
+    if (step === "viewer") {
+      int = setInterval(() => {
+        if (!watermarkRef.current) return;
+        // randomize watermark position inside the viewer box
+        const el = watermarkRef.current;
+        const left = Math.floor(Math.random() * 60) + "%"; // 0%..60%
+        const top = Math.floor(Math.random() * 80) + "%";
+        el.style.left = left;
+        el.style.top = top;
+      }, 1000);
+    }
+    return () => clearInterval(int);
+  }, [step]);
+
+  // Helper: create a simple random token
+  function generateToken() {
+    return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+
+  // Prevent context menu and common save actions
+  useEffect(() => {
+    function block(e) {
+      e.preventDefault();
+    }
+    if (step === "viewer") {
+      document.addEventListener("contextmenu", block);
+      document.addEventListener("keydown", keyBlocker);
+    }
+    return () => {
+      document.removeEventListener("contextmenu", block);
+      document.removeEventListener("keydown", keyBlocker);
+    };
+  }, [step]);
+
+  function keyBlocker(e) {
+    // block common keys: Ctrl+S, Ctrl+P, PrintScreen (not fully preventable), Ctrl+Shift+I
+    if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "p")) {
+      e.preventDefault();
+    }
+    if (e.key === "PrintScreen") {
+      e.preventDefault();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "i") {
+      e.preventDefault();
+    }
+  }
+
+  // UI components -----------------------------------------------------------
+  const Home = () => (
+    <div className="min-h-screen bg-gradient-to-b from-indigo-600 to-purple-600 flex items-center justify-center p-4">
+      <div className="w-full max-w-xl bg-white/90 rounded-2xl shadow-xl p-6 mobile:mx-2">
+        <h1 className="text-2xl font-bold text-gray-900">Ephemeral Images — Mobile First</h1>
+        <p className="mt-2 text-sm text-gray-700">Choose school, class and subject. You will pay with UPI. Images open for 10 minutes only.</p>
+
+        <div className="mt-5 space-y-3">
+          <label className="block text-xs text-gray-600">School</label>
+          <select className="w-full rounded-lg p-3 bg-gray-100" value={school} disabled>
+            <option>{school}</option>
+          </select>
+
+          <label className="block text-xs text-gray-600">Class</label>
+          <select className="w-full rounded-lg p-3 bg-gray-100" value={className} disabled>
+            <option>{className}</option>
+          </select>
+
+          <label className="block text-xs text-gray-600">Subject</label>
+          <select value={subject} onChange={(e) => setSubject(e.target.value)} className="w-full rounded-lg p-3 bg-white border">
+            <option>English</option>
+            {/* future subjects can be added */}
+          </select>
+
+          <div className="mt-4">
+            <button
+              className="w-full bg-indigo-700 text-white rounded-xl p-3 font-semibold"
+              onClick={() => setStep("payment")}
+            >
+              Proceed to Pay (UPI)
+            </button>
+          </div>
+
+          <p className="text-xs text-gray-600 mt-3">Payment will open your UPI app. After confirming payment, return and press "I Paid". A secure viewer will open after a 2-minute verification delay.</p>
+        </div>
+      </div>
+    </div>
+  );
+
+  const Payment = () => (
+    <div className="min-h-screen bg-gradient-to-b from-purple-600 to-pink-600 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white/95 rounded-2xl p-6 shadow-lg">
+        <h2 className="text-lg font-bold">Pay with UPI</h2>
+        <p className="text-sm text-gray-700 mt-1">UPI ID: <strong>{upiId}</strong></p>
+
+        <div className="mt-4 flex justify-center">
+          {qrDataUrl ? (
+            <img src={qrDataUrl} alt="UPI QR" className="w-48 h-48 rounded-lg shadow" />
+          ) : (
+            <div className="w-48 h-48 bg-gray-200 rounded-lg flex items-center justify-center">QR</div>
+          )}
+        </div>
+
+        <div className="mt-4 space-y-2">
+          <div className="rounded-lg p-3 bg-gray-50 text-sm">UPI deep link will open your installed UPI app. Amount is left to user — you can change it server-side.</div>
+
+          <button
+            className="w-full bg-green-600 text-white rounded-xl p-3 font-semibold"
+            onClick={() => {
+              // For mobile devices, open the UPI deep link to trigger installed UPI app
+              const deep = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(
+                "Ephemeral Images Store"
+              )}&tn=${encodeURIComponent("Purchase: " + subject)}&cu=INR`;
+              window.location.href = deep;
+            }}
+          >
+            Open UPI App
+          </button>
+
+          <button
+            className="w-full border border-gray-300 rounded-xl p-3 font-semibold bg-white"
+            onClick={() => setStep("waiting")}
+          >
+            I Paid — Start Verification
+          </button>
+
+          <button className="w-full text-sm text-gray-600" onClick={() => setStep("home")}>Back</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const Waiting = () => (
+    <div className="min-h-screen bg-gradient-to-b from-indigo-700 to-indigo-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white/95 rounded-2xl p-6 shadow-lg text-center">
+        <h3 className="text-lg font-bold">Verification in progress</h3>
+        <p className="mt-2 text-sm text-gray-700">We are verifying your payment. This is a security measure — secure page will open after the timer below.</p>
+
+        <div className="mt-6">
+          <div className="text-6xl font-mono">{formatTime(waitSecondsLeft)}</div>
+          <div className="text-xs text-gray-500 mt-2">Do not close this page.</div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const Viewer = () => {
+    // Simple check: session token must be present in sessionStorage
+    const token = sessionStorage.getItem("ephemeral_token");
+    if (!token || token !== sessionToken) {
+      // token mismatch -> block
+      return (
+        <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-6 max-w-md text-center">
+            <h3 className="font-bold">Access Denied</h3>
+            <p className="text-sm text-gray-600 mt-2">This link is single-use and bound to the device that paid. Sharing the link won't work.</p>
+            <button className="mt-4 bg-indigo-600 text-white p-2 rounded" onClick={() => setStep("home")}>Go Home</button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-black text-white p-4">
+        <div className="max-w-3xl mx-auto">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm">{school}</div>
+              <div className="text-xs text-gray-300">{className} • {subject}</div>
+            </div>
+            <div className="text-xs text-gray-400">Expires in: {formatDuration(viewExpirySecondsLeft)}</div>
+          </div>
+
+          <div className="mt-4 rounded-lg overflow-hidden relative bg-gray-800 shadow-lg" style={{ height: '70vh' }}>
+            {/* images rendered as a canvas-like protected element */}
+            <ProtectedImageCarousel images={mockImages} watermarkRef={watermarkRef} />
+
+            {/* moving watermark element (absolutely positioned) */}
+            <div ref={watermarkRef} className="pointer-events-none select-none absolute opacity-60 text-white text-xs font-bold" style={{ transform: 'rotate(-20deg)' }}>
+              {`SAMPLE - ${new Date().toLocaleDateString()}`}
+            </div>
+
+            {/* overlay to block long-press save on mobile */}
+            <div className="absolute inset-0" style={{ touchAction: 'none' }}></div>
+          </div>
+
+          <div className="mt-4 text-center text-xs text-gray-400">Right-click, long-press save, and printing are heavily mitigated but NOT 100% preventable.</div>
+        </div>
+      </div>
+    );
+  };
+
+  const Expired = () => (
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+      <div className="bg-white p-6 rounded-lg shadow text-center max-w-md">
+        <h3 className="text-lg font-bold">Session Expired</h3>
+        <p className="mt-2 text-sm text-gray-700">The 10 minute viewing window has ended. Purchase again to view.</p>
+        <button className="mt-4 bg-indigo-600 text-white p-3 rounded" onClick={() => setStep('home')}>Buy Again</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="mobile:text-sm">
+      {step === "home" && <Home />}
+      {step === "payment" && <Payment />}
+      {step === "waiting" && <Waiting />}
+      {step === "viewer" && <Viewer />}
+      {step === "expired" && <Expired />}
+    </div>
+  );
+}
+
+// Helper components & functions -------------------------------------------------
+function formatTime(s) {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${pad(m)}:${pad(sec)}`;
+}
+function pad(n) {
+  return n.toString().padStart(2, '0');
+}
+function formatDuration(s) {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}m ${sec}s`;
+}
+
+function ProtectedImageCarousel({ images = [], watermarkRef }) {
+  const [index, setIndex] = useState(0);
+  const containerRef = useRef(null);
+
+  // rotate images every 8 seconds (can be configured)
+  useEffect(() => {
+    const int = setInterval(() => setIndex((i) => (i + 1) % images.length), 8000);
+    return () => clearInterval(int);
+  }, [images.length]);
+
+  // draw image into canvas to reduce right-click -> save-as behavior
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = images[index];
+    const canvas = containerRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    img.onload = () => {
+      // clear & draw
+      canvas.width = canvas.clientWidth * devicePixelRatio;
+      canvas.height = canvas.clientHeight * devicePixelRatio;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // maintain aspect cover
+      const ratio = Math.max(canvas.width / img.width, canvas.height / img.height);
+      const w = img.width * ratio;
+      const h = img.height * ratio;
+      const x = (canvas.width - w) / 2;
+      const y = (canvas.height - h) / 2;
+      ctx.drawImage(img, x, y, w, h);
+      // add semi-transparent overlay to discourage simple cropping
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // draw watermark text onto canvas as an additional layer
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.font = `${36 * devicePixelRatio}px sans-serif`;
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(-0.3);
+      ctx.textAlign = 'center';
+      ctx.fillText('CONFIDENTIAL', 0, 0);
+      ctx.restore();
+    };
+  }, [index, images]);
+
+  return (
+    <div className="w-full h-full relative bg-black flex items-center justify-center">
+      {/* Canvas used to render image pixels (prevents simple save-as of original image URL) */}
+      <canvas ref={containerRef} className="w-full h-full block" style={{ display: 'block' }}></canvas>
+
+      {/* Invisible overlay to prevent selection and capture via long-press context menus */}
+      <div className="absolute inset-0" style={{ userSelect: 'none' }}></div>
+
+      {/* Next / Prev small controls (optional) */}
+      <div className="absolute left-2 top-1/2 -translate-y-1/2">
+        <button className="p-2 bg-black/40 rounded-full" onClick={() => setIndex((i) => (i - 1 + images.length) % images.length)}>◀</button>
+      </div>
+      <div className="absolute right-2 top-1/2 -translate-y-1/2">
+        <button className="p-2 bg-black/40 rounded-full" onClick={() => setIndex((i) => (i + 1) % images.length)}>▶</button>
+      </div>
+    </div>
+  );
+}
+
+/*
+Security & production notes (IMPORTANT):
+
+1) This is a front-end demonstration. A robust, secure implementation requires server components:
+   - A payment verification endpoint that confirms UPI success (or you can rely on manual verification).
+   - A server that issues signed, single-use, short-lived tokens (JWT) after verifying payment. Tokens should be
+     bound to an identifier (device fingerprint or nonce) and expire quickly.
+   - Serve images through a streaming or signed URL that expires. Do NOT place original high-resolution files on
+     public URLs.
+
+2) Preventing screenshots is impossible on general-purpose mobile devices. You can only make it harder:
+   - Use dynamic watermarks (this demo moves a watermark every second and paints faint watermarks on canvas).
+   - Stream images via canvas and avoid providing direct image URLs.
+   - Use overlays and intercept contextmenu and save events (best-effort only).
+
+3) For stronger protection consider:
+   - Platform-specific SDKs (iOS/Android) which can detect screen recording or use DRM.
+   - Third-party services that provide secure streaming and forensic watermarking.
+
+4) Link-sharing prevention in this demo uses sessionStorage token. In production:
+   - Issue tokens server-side and associate with a device id or one-time token delivered to the paying device only.
+   - Invalidate tokens after first use.
+
+5) UPI flow: the app opens a UPI deep-link. There is no universal callback to the web app. You must verify payment
+   server-side (IMPS/UPI notifications from your PSP or manual reconciliation).
+
+Deployment suggestions:
+- Front-end: host as static site (Vercel, Netlify). Use HTTPS.
+- Back-end: small Node/Express server with endpoints: /create-session, /verify-payment, /image/:signedId
+
+*/
